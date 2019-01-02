@@ -1,2 +1,6 @@
 .vs/
 Debug/
+*.filters
+*.user
+vst3sdk
+
