@@ -379,7 +379,7 @@ public:
     plugin->dispatcher(plugin, effProcessEvents, 0, 0, vstEvents, 0.0f);
   }
 
-  void processAudio(SampleBuffer<float>& inputSampleBuffer, SampleBuffer<float>& outputSampleBuffer) {
+  void processAudio(VstSampleBuffer& inputSampleBuffer, VstSampleBuffer& outputSampleBuffer) {
 
     // NOTE: we're ony processing a single plugin which is an instrument. The input
     // buffer was cleared on construction and will never be altered. And we only
@@ -495,10 +495,10 @@ int main(int argc, char *argv[])
               // is because the VST plugin could be an effect (which would require input
               // audio to which the effect would be applied) or an instrument (which just
               // requires output).
-              SampleBuffer<float> inputSampleBuffer(
+              VstSampleBuffer inputSampleBuffer(
                 GlobalSettings::get().getNumChannels(),
                 GlobalSettings::get().getBlockSize());
-              SampleBuffer<float> outputSampleBuffer(
+              VstSampleBuffer outputSampleBuffer(
                 GlobalSettings::get().getNumChannels(),
                 GlobalSettings::get().getBlockSize());
 

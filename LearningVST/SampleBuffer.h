@@ -51,3 +51,5 @@ public:
     return numChannels;
   }
 };
+
+typedef SampleBuffer<float> VstSampleBuffer;

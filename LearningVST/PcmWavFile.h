@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include <sstream>
+#include "SampleBuffer.h"
 
 enum class AudioBitDepth {
   Type8 = 8,
@@ -11,8 +12,6 @@ enum class AudioBitDepth {
   Type24 = 24,
   Type32 = 32,
 };
-
-template <typename T> class SampleBuffer;
 
 class PcmWavFile {
 public:
@@ -55,6 +54,6 @@ protected:
   //std::ofstream *ofs = nullptr;
 public:
   bool openWrite(const std::string& fileName, uint numChannels, uint sampleRate, AudioBitDepth bitDepth);
-  bool writeBuffer(const SampleBuffer<float>& sampleBuffer);
+  bool writeBuffer(const VstSampleBuffer& sampleBuffer);
   bool closeWrite();
 };

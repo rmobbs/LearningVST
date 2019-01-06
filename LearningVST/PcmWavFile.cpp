@@ -50,7 +50,7 @@ bool PcmWavFile::closeWrite() {
   return true;
 }
 
-bool PcmWavFile::writeBuffer(const SampleBuffer<float>& sampleBuffer) {
+bool PcmWavFile::writeBuffer(const VstSampleBuffer& sampleBuffer) {
   auto numSamplesToWrite = sampleBuffer.getNumChannels() * sampleBuffer.getBlockSize();
 
   // Data from the VST SDK is channel sequential (channel 1 bufsize samples, channel 2 bufsize samples, ..., channel N bufsize samples)

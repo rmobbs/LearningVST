@@ -76,6 +76,10 @@ public:
     }
     return this->gptr() - this->eback();
   }
+
+  pos_type seekpos(pos_type pos, std::ios_base::openmode which = std::ios_base::in) override {
+    return seekoff(pos - pos_type(off_type(0)), std::ios_base::beg, which);
+  }
 };
 
 // Custom istream with >> operator that doesn't fail if the file contains a zero, also handles endianness
@@ -228,6 +232,7 @@ bool MidiSource::readTrack(std::istream& is, unsigned int trackIndex) {
 
   unsigned int lastByte = static_cast<unsigned int>(eis.tellg()) + byteCount;
   while (static_cast<unsigned int>(eis.tellg()) < lastByte) {
+    unsigned int currByte = static_cast<unsigned int>(eis.tellg());
     // First entry for each data element is a variable-length delta time stored
     // as a series of byte chunks.
     // If the MSB is set this byte contributes the next 7 bits to the delta time
@@ -302,7 +307,7 @@ bool MidiSource::readTrack(std::istream& is, unsigned int trackIndex) {
           }
           // Otherwise just skip it
           else if (readByte > 0) {
-            eis.seekg(readByte);
+            eis.seekg(readByte, std::ios_base::cur);
             if (checkEofAndFailBit(eis, "while skipping meta data")) {
               return false;
             }
@@ -317,7 +322,7 @@ bool MidiSource::readTrack(std::istream& is, unsigned int trackIndex) {
           }
 
           // Just skip it
-          eis.seekg(readByte);
+          eis.seekg(readByte, std::ios_base::cur);
           if (checkEofAndFailBit(eis, "while skipping sysex data")) {
             return false;
           }
@@ -398,7 +403,7 @@ bool MidiSource::readTrack(std::istream& is, unsigned int trackIndex) {
         // than just returning
         std::cerr << "Encountered unknown message type ... "
           "skipping 2 bytes of data but errors could result" << std::endl;
-        eis.seekg(1);
+        eis.seekg(1, std::ios_base::cur);
         if (checkEofAndFailBit(eis, "while skipping unknown message data")) {
           return false;
         }
