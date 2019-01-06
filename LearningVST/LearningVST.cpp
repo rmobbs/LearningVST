@@ -366,10 +366,13 @@ public:
         memset(vstMidiEvent, 0, sizeof(VstMidiEvent));
         vstMidiEvent->type = kVstMidiType;
         vstMidiEvent->byteSize = sizeof(vstMidiEvent);
-        vstMidiEvent->deltaFrames = static_cast<VstInt32>(midiEvent.delta);
-        vstMidiEvent->midiData[0] = midiEvent.message.status;
-        vstMidiEvent->midiData[1] = midiEvent.dataptr[0];
-        vstMidiEvent->midiData[2] = midiEvent.dataptr[1];
+        vstMidiEvent->deltaFrames = static_cast<VstInt32>(midiEvent.timeDelta);
+        vstMidiEvent->midiData[0] = midiEvent.dataptr[0];
+        vstMidiEvent->midiData[1] = midiEvent.dataptr[1];
+        vstMidiEvent->midiData[2] = midiEvent.dataptr[2];
+
+        // VST documentation says vstMidiEvent->midiData[3] is reserved, but
+        // there are valid messages with info in that byte ...
 
         vstEvents->events[vstEvents->numEvents] = reinterpret_cast<VstEvent*>(vstMidiEvent);
         ++vstEvents->numEvents;
@@ -423,7 +426,7 @@ bool getBlockFromSequence(std::queue<MidiEvent>& midiSequence, ulong startTimeSt
 
     midiSequence.pop();
 
-    nextEvent.delta = nextEvent.timeStamp - startTimeStamp;
+    nextEvent.timeDelta = nextEvent.timeStamp - startTimeStamp;
     midiBlock.push(nextEvent);
   }
   return true;

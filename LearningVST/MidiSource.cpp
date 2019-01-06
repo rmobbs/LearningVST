@@ -264,15 +264,12 @@ bool MidiSource::readTrack(endian_bytestream& ebs, unsigned int trackIndex) {
       currentEvent.timeStamp = currentTimeInSampleFrames;
       currentEvent.eventType = MidiEvent::EventType::Message;
 
-      // All messages have at least one byte of data
+      // All messages have a byte of status plus at least one byte of data
       uchar dataByte;
       ebs >> dataByte;
       if (!ebs.isGood("while reading message data 0")) {
         return false;
       }
-
-      // Least significant nibble of the status byte is the channel
-      currentEvent.message.channel = (readByte & 0x0F);
 
       // Determine the message type
       if ((readByte & 0xF0) == 0x80) {
@@ -336,30 +333,29 @@ bool MidiSource::readTrack(endian_bytestream& ebs, unsigned int trackIndex) {
         }
       }
       else {
-        // Store the raw status byte for passing to VST
-        currentEvent.message.status = readByte;
-
         // Mark location in data buffer
         eventDataIndex.push_back(currentTrack.eventData.size());
 
         // Ensure we have space in the data buffer
         if (currentEvent.message.type == MidiEvent::MessageType::VoiceProgramChange ||
             currentEvent.message.type == MidiEvent::MessageType::VoiceKeyPressure) {
-          currentEvent.datalen = 1;
-        }
-        else {
           currentEvent.datalen = 2;
         }
-
+        else {
+          currentEvent.datalen = 3;
+        }
         currentTrack.eventData.resize(currentTrack.
           eventData.size() + currentEvent.datalen);
 
-        // Store bit 0
-        currentTrack.eventData[eventDataIndex.back()] = dataByte;
-        if (currentEvent.datalen > 1) {
-          // Store bit 1
+        // Store status byte
+        currentTrack.eventData[eventDataIndex.back()] = readByte;
+
+        // Store data byte 0
+        currentTrack.eventData[eventDataIndex.back() + 1] = dataByte;
+        if (currentEvent.datalen > 2) {
+          // Store data byte 1
           ebs >> dataByte;
-          currentTrack.eventData[eventDataIndex.back() + 1] = dataByte;
+          currentTrack.eventData[eventDataIndex.back() + 2] = dataByte;
           if (!ebs.isGood("while reading message data 1")) {
             return false;
           }
@@ -374,6 +370,7 @@ bool MidiSource::readTrack(endian_bytestream& ebs, unsigned int trackIndex) {
   currentTrack.eventData.shrink_to_fit();
 
   assert(eventDataIndex.size() == currentTrack.events.size());
+
   auto eventIter = currentTrack.events.begin();
   for (const auto& dataIndex : eventDataIndex) {
     // Fixup data pointers

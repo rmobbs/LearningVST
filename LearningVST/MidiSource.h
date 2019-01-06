@@ -60,17 +60,14 @@ struct MidiEvent {
     } meta;
     struct {
       MessageType type;
-      uchar channel;
-      uchar status;
     } message;
   }; 
 
   ulong timeStamp = 0;
+  ulong timeDelta = 0;
 
   uchar* dataptr = nullptr;
   ushort datalen = 0;
-
-  ulong delta = 0; // Ugh
 };
 
 struct MidiTrack {
@@ -87,6 +84,7 @@ public:
   explicit endian_bytestream()
   {
   }
+
   template <typename T> inline endian_bytestream& operator>>(T& outData) {
     this->read(reinterpret_cast<char *>(&outData), sizeof(outData));
 
@@ -97,6 +95,7 @@ public:
     }
     return *this;
   }
+
   bool isGood(const std::string& errorTag = { }) {
     if (eof()) {
       std::cerr << "Unexpected EOF " << errorTag << std::endl;
