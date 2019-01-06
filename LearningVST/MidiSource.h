@@ -5,6 +5,8 @@
 #include <vector>
 #include <queue>
 #include "Types.h"
+#include <sstream>
+#include <iostream>
 
 struct MidiEvent {
   enum class EventType {
@@ -78,6 +80,36 @@ struct MidiTrack {
   unsigned int index;
 };
 
+// Stringstream's >> operator fails and marks EOF if you try to read a 0;
+// this custom extension avoids that behavior and handles Endian swapping.
+class endian_bytestream : public std::stringstream {
+public:
+  explicit endian_bytestream()
+  {
+  }
+  template <typename T> inline endian_bytestream& operator>>(T& outData) {
+    this->read(reinterpret_cast<char *>(&outData), sizeof(outData));
+
+    // One little Endian
+    for (int i = 0; i < sizeof(T) / 2; ++i) {
+      std::swap(reinterpret_cast<char *>(&outData)[i],
+        reinterpret_cast<char *>(&outData)[sizeof(T) - 1 - i]);
+    }
+    return *this;
+  }
+  bool isGood(const std::string& errorTag = { }) {
+    if (eof()) {
+      std::cerr << "Unexpected EOF " << errorTag << std::endl;
+      return false;
+    }
+    if (fail()) {
+      std::cerr << "Unknown failure " << errorTag << std::endl;
+      return false;
+    }
+    return true;
+  }
+};
+
 class MidiSource {
 protected:
   static constexpr ushort kDefaultTimeDivision = 96;
@@ -95,9 +127,9 @@ protected:
 
   std::vector<MidiTrack> tracks;
 
-  bool readTrack(std::istream& is, unsigned int trackIndex);
-  bool parseHeader(std::istream& is);
-  bool parseChunk(std::istream& is, const std::string& expectedChunkId);
+  bool readTrack(endian_bytestream& ebs, unsigned int trackIndex);
+  bool parseHeader(endian_bytestream& ebs);
+  bool parseChunk(endian_bytestream& ebs, const std::string& expectedChunkId);
 
 public:
   bool openFile(const std::string& fileName);

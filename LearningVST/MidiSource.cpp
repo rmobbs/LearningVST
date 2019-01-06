@@ -1,6 +1,5 @@
 #include "MidiSource.h"
 
-#include <iostream>
 #include <fstream>
 #include <array>
 #include <vector>
@@ -8,27 +7,6 @@
 #include <assert.h>
 #include <map>
 #include "AudioClock.h"
-
-bool checkEofAndFailBit(std::istream& is, const std::string& errorTag = { }) {
-  if (is.eof()) {
-    std::cerr << "Unexpected EOF " << errorTag << std::endl;
-    return true;
-  }
-  if (is.fail()) {
-    std::cerr << "Unknown failure " << errorTag << std::endl;
-    return true;
-  }
-  return false;
-}
-
-template <typename T> T EndianSwap(const T& value) {
-  T retval = value;
-  for (int i = 0; i < sizeof(T) / 2; ++i) {
-    std::swap(reinterpret_cast<char *>(&retval)[i],
-      reinterpret_cast<char *>(&retval)[sizeof(T) - 1 - i]);
-  }
-  return retval;
-}
 
 std::map<unsigned char, MidiEvent::EventType> ByteSignatureToReservedEventType = {
   { 0xFF, MidiEvent::EventType::Meta },
@@ -54,72 +32,27 @@ std::map<unsigned char, MidiEvent::MetaType> ByteSignatureToMidiMetaType = {
   { 0x7F, MidiEvent::MetaType::SequencerSpecificMetaEvent },
 };
 
-// Yes, the this-> are necessary or it won't compile (MSVC 2017)
-template <typename CharT, typename TraitsT = std::char_traits<CharT>> class vector_streambuf : public std::basic_streambuf<CharT, TraitsT> {
-public:
-  typedef typename TraitsT::pos_type pos_type;
-  typedef typename TraitsT::off_type off_type;
-
-  vector_streambuf(std::vector<CharT>& vec) {
-    this->setg(vec.data(), vec.data(), vec.data() + vec.size());
-  }
-
-  pos_type seekoff(off_type off, std::ios_base::seekdir dir, std::ios_base::openmode which = std::ios_base::in) override {
-    if (dir == std::ios_base::cur) {
-      this->gbump(static_cast<int>(off));
-    }
-    else if (dir == std::ios_base::end) {
-      this->setg(this->eback(), this->egptr() + off, this->egptr());
-    }
-    else if (dir == std::ios_base::beg) {
-      this->setg(this->eback(), this->eback() + off, this->egptr());
-    }
-    return this->gptr() - this->eback();
-  }
-
-  pos_type seekpos(pos_type pos, std::ios_base::openmode which = std::ios_base::in) override {
-    return seekoff(pos - pos_type(off_type(0)), std::ios_base::beg, which);
-  }
-};
-
-// Custom istream with >> operator that doesn't fail if the file contains a zero, also handles endianness
-template <typename CharT, typename TraitsT = std::char_traits<CharT>> class endian_istream : public std::istream {
-public:
-  endian_istream(std::basic_streambuf<CharT, TraitsT>* sb) : std::istream(sb) {
-  }
-  template <typename T> inline endian_istream& operator>>(T& outData) {
-    this->read(reinterpret_cast<char *>(&outData), sizeof(outData));
-    outData = EndianSwap(outData);
-    return *this;
-  }
-};
-
 bool MidiSource::openFile(const std::string& fileName) {
-  // Read the file into a buffer
-  std::ifstream ifs(fileName, std::ios::binary | std::ios::ate);
-  auto size = ifs.tellg();
-  ifs.seekg(0, std::ios::beg);
-  std::vector<char> buf(static_cast<size_t>(size));
-  if (!ifs.read(buf.data(), size)) {
+  std::ifstream ifs(fileName, std::ios::binary);
+  if (!ifs) {
     std::cerr << "Unable to open MIDI file " << fileName << std::endl;
-    ifs.close();
     return false;
   }
+
+  // Read the file into a buffer
+  endian_bytestream ebs;
+  ebs << ifs.rdbuf();
   ifs.close();
 
-  // Wrap the vector in an istream for easier reading
-  auto vecbuf = vector_streambuf(buf);
-  std::istream is(&vecbuf);
-
   // Header
-  if (!parseHeader(is)) {
+  if (!parseHeader(ebs)) {
     std::cerr << "Unable to parse MIDI file header" << std::endl;
     return false;
   }
 
-  // Read tracks
+  // Tracks
   for (unsigned int trackIndex = 0; trackIndex < static_cast<unsigned int>(this->getTrackCount()); ++trackIndex) {
-    if (!readTrack(is, trackIndex)) {
+    if (!readTrack(ebs, trackIndex)) {
       return false;
     }
   }
@@ -127,12 +60,12 @@ bool MidiSource::openFile(const std::string& fileName) {
   return true;
 }
 
-bool MidiSource::parseChunk(std::istream& is, const std::string& expectedChunkId) {
+bool MidiSource::parseChunk(endian_bytestream& ebs, const std::string& expectedChunkId) {
   char chunkId[4] = { };
 
-  is.read(chunkId, 4);
+  ebs.read(chunkId, 4);
 
-  if (checkEofAndFailBit(is, "while reading chunk")) {
+  if (!ebs.isGood("while reading chunk")) {
     return false;
   }
 
@@ -146,19 +79,17 @@ bool MidiSource::parseChunk(std::istream& is, const std::string& expectedChunkId
   return true;
 }
 
-bool MidiSource::parseHeader(std::istream& is) {
+bool MidiSource::parseHeader(endian_bytestream& ebs) {
   // MThd character tag
-  if (!parseChunk(is, "MThd")) {
+  if (!parseChunk(ebs, "MThd")) {
     std::cerr << "Unable to find MIDI file header tag" << std::endl;
     return false;
   }
 
-  endian_istream eis(is.rdbuf());
-
   // Header byte count, unsigned int
   unsigned int byteCount;
-  eis >> byteCount;
-  if (checkEofAndFailBit(eis, "while reading header byte count")) {
+  ebs >> byteCount;
+  if (!ebs.isGood("while reading header byte count")) {
     return false;
   }
   if (byteCount != 6) {
@@ -167,22 +98,22 @@ bool MidiSource::parseHeader(std::istream& is) {
   }
 
   // Format type
-  eis >> formatType;
-  if (checkEofAndFailBit(eis, "while reading format type")) {
+  ebs >> formatType;
+  if (!ebs.isGood("while reading format type")) {
     return false;
   }
 
   // Number of tracks
   unsigned short trackCount;
-  eis >> trackCount;
-  if (checkEofAndFailBit(eis, "while reading track count")) {
+  ebs >> trackCount;
+  if (!ebs.isGood("while reading track count")) {
     return false;
   }
   tracks.resize(trackCount);
 
   // Time division
-  eis >> timeDivision;
-  if (checkEofAndFailBit(eis, "while reading time division")) {
+  ebs >> timeDivision;
+  if (!ebs.isGood("while reading time division")) {
     return false;
   }
 
@@ -191,7 +122,7 @@ bool MidiSource::parseHeader(std::istream& is) {
     timeDivisionType = TimeDivisionType::SmpteFrameData;
 
     // Currently not supported
-    std::cerr << "SMTPE frame based time division is currently not supported" << std::endl;
+    std::cerr << "SMTPE frame based time division ebs currently not supported" << std::endl;
     return false;
   }
   else {
@@ -202,7 +133,7 @@ bool MidiSource::parseHeader(std::istream& is) {
 }
 
 
-bool MidiSource::readTrack(std::istream& is, unsigned int trackIndex) {
+bool MidiSource::readTrack(endian_bytestream& ebs, unsigned int trackIndex) {
   assert(trackIndex < tracks.size());
 
   ulong currentTimeInSampleFrames = 0;
@@ -212,16 +143,14 @@ bool MidiSource::readTrack(std::istream& is, unsigned int trackIndex) {
   currentTrack.index = trackIndex;
 
   // MTrk character tag
-  if (!parseChunk(is, "MTrk")) {
+  if (!parseChunk(ebs, "MTrk")) {
     std::cerr << "Expected to find MTrk tag at start of track" << std::endl;
     return false;
   }
 
-  endian_istream eis(is.rdbuf());
-
   unsigned int byteCount;
-  eis >> byteCount;
-  if (checkEofAndFailBit(eis, "while reading track byte count")) {
+  ebs >> byteCount;
+  if (!ebs.isGood("while reading track byte count")) {
     return false;
   }
 
@@ -230,17 +159,16 @@ bool MidiSource::readTrack(std::istream& is, unsigned int trackIndex) {
   // then fixup pointers
   std::vector<uint> eventDataIndex;
 
-  unsigned int lastByte = static_cast<unsigned int>(eis.tellg()) + byteCount;
-  while (static_cast<unsigned int>(eis.tellg()) < lastByte) {
-    unsigned int currByte = static_cast<unsigned int>(eis.tellg());
+  unsigned int lastByte = static_cast<unsigned int>(ebs.tellg()) + byteCount;
+  while (static_cast<unsigned int>(ebs.tellg()) < lastByte) {
     // First entry for each data element is a variable-length delta time stored
     // as a series of byte chunks.
     // If the MSB is set this byte contributes the next 7 bits to the delta time
     unsigned int deltaTime = 0;
     unsigned char readByte;
     do {
-      eis >> readByte;
-      if (checkEofAndFailBit(eis, "while reading data event delta time")) {
+      ebs >> readByte;
+      if (!ebs.isGood("while reading data event delta time")) {
         return false;
       }
       deltaTime = (deltaTime << 7) | (readByte & 0x7F);
@@ -253,8 +181,8 @@ bool MidiSource::readTrack(std::istream& is, unsigned int trackIndex) {
     currentTimeInSampleFrames += static_cast<long>(deltaTime * sampleFramesPerTick);
 
     // Next is the event type
-    eis >> readByte;
-    if (checkEofAndFailBit(eis, "while reading event type")) {
+    ebs >> readByte;
+    if (!ebs.isGood("while reading event type")) {
       return false;
     }
 
@@ -269,8 +197,8 @@ bool MidiSource::readTrack(std::istream& is, unsigned int trackIndex) {
       switch (eventType->second) {
         case MidiEvent::EventType::Meta: {
           // Meta type
-          eis >> readByte;
-          if (checkEofAndFailBit(eis, "while reading meta type")) {
+          ebs >> readByte;
+          if (!ebs.isGood("while reading meta type")) {
             return false;
           }
 
@@ -278,8 +206,8 @@ bool MidiSource::readTrack(std::istream& is, unsigned int trackIndex) {
           const auto metaType = ByteSignatureToMidiMetaType.find(readByte);
 
           // Data size
-          eis >> readByte;
-          if (checkEofAndFailBit(eis, "while reading meta data size")) {
+          ebs >> readByte;
+          if (!ebs.isGood("while reading meta data size")) {
             return false;
           }
 
@@ -292,10 +220,9 @@ bool MidiSource::readTrack(std::istream& is, unsigned int trackIndex) {
               currentEvent.datalen = readByte;
               eventDataIndex.push_back(currentTrack.eventData.size());
               currentTrack.eventData.resize(currentTrack.eventData.size() + currentEvent.datalen);
-              auto blah = currentTrack.eventData.capacity();
-              eis.read(reinterpret_cast<char *>(currentTrack.
+              ebs.read(reinterpret_cast<char *>(currentTrack.
                 eventData.data() + eventDataIndex.back()), currentEvent.datalen);
-              if (checkEofAndFailBit(eis, "while reading meta data")) {
+              if (!ebs.isGood("while reading meta data")) {
                 return false;
               }
             }
@@ -307,8 +234,8 @@ bool MidiSource::readTrack(std::istream& is, unsigned int trackIndex) {
           }
           // Otherwise just skip it
           else if (readByte > 0) {
-            eis.seekg(readByte, std::ios_base::cur);
-            if (checkEofAndFailBit(eis, "while skipping meta data")) {
+            ebs.seekg(readByte, std::ios_base::cur);
+            if (!ebs.isGood("while skipping meta data")) {
               return false;
             }
           }
@@ -316,14 +243,14 @@ bool MidiSource::readTrack(std::istream& is, unsigned int trackIndex) {
         }
         case MidiEvent::EventType::Sysex: {
           // Data size
-          eis >> readByte;
-          if (checkEofAndFailBit(eis, "while reading sysex data size")) {
+          ebs >> readByte;
+          if (!ebs.isGood("while reading sysex data size")) {
             return false;
           }
 
           // Just skip it
-          eis.seekg(readByte, std::ios_base::cur);
-          if (checkEofAndFailBit(eis, "while skipping sysex data")) {
+          ebs.seekg(readByte, std::ios_base::cur);
+          if (!ebs.isGood("while skipping sysex data")) {
             return false;
           }
           break;
@@ -339,8 +266,8 @@ bool MidiSource::readTrack(std::istream& is, unsigned int trackIndex) {
 
       // All messages have at least one byte of data
       uchar dataByte;
-      eis >> dataByte;
-      if (checkEofAndFailBit(eis, "while reading message data 0")) {
+      ebs >> dataByte;
+      if (!ebs.isGood("while reading message data 0")) {
         return false;
       }
 
@@ -403,8 +330,8 @@ bool MidiSource::readTrack(std::istream& is, unsigned int trackIndex) {
         // than just returning
         std::cerr << "Encountered unknown message type ... "
           "skipping 2 bytes of data but errors could result" << std::endl;
-        eis.seekg(1, std::ios_base::cur);
-        if (checkEofAndFailBit(eis, "while skipping unknown message data")) {
+        ebs.seekg(1, std::ios_base::cur);
+        if (!ebs.isGood("while skipping unknown message data")) {
           return false;
         }
       }
@@ -426,15 +353,14 @@ bool MidiSource::readTrack(std::istream& is, unsigned int trackIndex) {
 
         currentTrack.eventData.resize(currentTrack.
           eventData.size() + currentEvent.datalen);
-        auto blah = currentTrack.eventData.capacity();
 
         // Store bit 0
         currentTrack.eventData[eventDataIndex.back()] = dataByte;
         if (currentEvent.datalen > 1) {
           // Store bit 1
-          eis >> dataByte;
+          ebs >> dataByte;
           currentTrack.eventData[eventDataIndex.back() + 1] = dataByte;
-          if (checkEofAndFailBit(eis, "while reading message data 1")) {
+          if (!ebs.isGood("while reading message data 1")) {
             return false;
           }
         }
