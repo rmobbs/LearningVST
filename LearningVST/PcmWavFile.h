@@ -12,7 +12,8 @@ enum class AudioBitDepth {
   Type32 = 32,
 };
 
-class SampleBuffer;
+template <typename T> class SampleBuffer;
+
 class PcmWavFile {
 public:
 #pragma pack(push, 1)
@@ -54,6 +55,6 @@ protected:
   //std::ofstream *ofs = nullptr;
 public:
   bool openWrite(const std::string& fileName, uint numChannels, uint sampleRate, AudioBitDepth bitDepth);
-  bool writeBuffer(const SampleBuffer& sampleBuffer);
+  bool writeBuffer(const SampleBuffer<float>& sampleBuffer);
   bool closeWrite();
 };

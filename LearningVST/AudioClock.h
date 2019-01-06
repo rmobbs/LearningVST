@@ -42,7 +42,7 @@ public:
 
   // Start of bar as musical position
   inline double getBarStartPos(double ppqPos) {
-    double currentBarPos = floor(ppqPos / 
+    double currentBarPos = floor(ppqPos /
       static_cast<double>(GlobalSettings::get().getBeatsPerMeasure()));
     return currentBarPos * static_cast<double>
       (GlobalSettings::get().getBeatsPerMeasure()) + 1.0;

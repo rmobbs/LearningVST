@@ -3,41 +3,44 @@
 #include "Types.h"
 #include <vector>
 
-class SampleBuffer {
+template <typename T> class SampleBuffer {
 protected:
   ushort numChannels;
   ulong blockSize;
-
-  // Let the baby have his way for now, but I think this can be a single float* alloc
-  float **samples;
+  std::vector<uchar> data;
 public:
   SampleBuffer(ushort numChannels, ulong blockSize) {
     this->numChannels = numChannels;
     this->blockSize = blockSize;
 
-    samples = new float*[numChannels];
+    // One T* and blockSize T for each channel
+    data.resize((sizeof(T*) + (sizeof(T) * blockSize)) * numChannels);
 
-    // Allocate and zero
+    // Fixup pointers and zero
+    auto p = reinterpret_cast<T**>(data.data());
+    auto s = reinterpret_cast<T* >(data.data() + sizeof(T*) * numChannels);
     for (auto i = 0; i < numChannels; ++i) {
-      samples[i] = new float[blockSize]();
+      p[i] = s + (i * blockSize);
+      memset(p[i], 0, sizeof(T) * blockSize);
     }
   }
 
   ~SampleBuffer() {
-    for (auto i = 0; i < numChannels; ++i) {
-      delete[] samples[i];
-    }
-    delete[] samples;
   }
 
   void zero() {
+    auto p = reinterpret_cast<T**>(data.data());
     for (auto i = 0; i < numChannels; ++i) {
-      memset(samples[i], 0, sizeof(float) * blockSize);
+      memset(p[i], 0, sizeof(T) * blockSize);
     }
   }
 
-  inline float** getSamples() const {
-    return samples;
+  inline T** getSamples() const {
+    return reinterpret_cast<T**>(const_cast<uchar*>(data.data()));
+  }
+
+  inline T** getSamples() {
+    return reinterpret_cast<T**>(data.data());
   }
 
   inline ulong getBlockSize() const {

@@ -50,7 +50,7 @@ bool PcmWavFile::closeWrite() {
   return true;
 }
 
-bool PcmWavFile::writeBuffer(const SampleBuffer& sampleBuffer) {
+bool PcmWavFile::writeBuffer(const SampleBuffer<float>& sampleBuffer) {
   auto numSamplesToWrite = sampleBuffer.getNumChannels() * sampleBuffer.getBlockSize();
 
   // Data from the VST SDK is channel sequential (channel 1 bufsize samples, channel 2 bufsize samples, ..., channel N bufsize samples)
@@ -58,12 +58,12 @@ bool PcmWavFile::writeBuffer(const SampleBuffer& sampleBuffer) {
   // Here we convert and interleave the data
 
   auto byteDepth = static_cast<int>(this->bitDepth) / 8;
-  
+
   // Ensure we have room to store the data
   pcmBuffer.resize(numSamplesToWrite * byteDepth);
 
   // Maximum value of a PCM sample
-  auto pcmSampleMaxValue = pow(2.0, 
+  auto pcmSampleMaxValue = pow(2.0,
     static_cast<double>(header.format.bitsPerSample - 1)) - 1.0;
 
   // Incoming values from VST are [-1.0,1.0]

@@ -133,8 +133,8 @@ bool MidiSource::parseChunk(std::istream& is, const std::string& expectedChunkId
   }
 
   if (strncmp(chunkId, expectedChunkId.c_str(), 4) != 0) {
-    std::cerr << "Unexpected chunk ID " << 
-      std::string(chunkId, chunkId + 4) << 
+    std::cerr << "Unexpected chunk ID " <<
+      std::string(chunkId, chunkId + 4) <<
       " (expected " << expectedChunkId << ")" << std::endl;
     return false;
   }
@@ -221,7 +221,7 @@ bool MidiSource::readTrack(std::istream& is, unsigned int trackIndex) {
     return false;
   }
 
-  // To reduce fragmentation, all event data is stored in a contiguous block; 
+  // To reduce fragmentation, all event data is stored in a contiguous block;
   // as this can resize several times we will store indices as we read events,
   // then fixup pointers
   std::vector<uint> eventDataIndex;
@@ -252,7 +252,7 @@ bool MidiSource::readTrack(std::istream& is, unsigned int trackIndex) {
     if (checkEofAndFailBit(eis, "while reading event type")) {
       return false;
     }
-    
+
     // Check for reserved event types
     const auto eventType = ByteSignatureToReservedEventType.find(readByte);
     if (eventType != ByteSignatureToReservedEventType.end()) {
@@ -394,7 +394,7 @@ bool MidiSource::readTrack(std::istream& is, unsigned int trackIndex) {
       }
 
       if (currentEvent.message.type == MidiEvent::MessageType::Unknown) {
-        // If we don't know what it is, we can attempt to skip it; can't be worse 
+        // If we don't know what it is, we can attempt to skip it; can't be worse
         // than just returning
         std::cerr << "Encountered unknown message type ... "
           "skipping 2 bytes of data but errors could result" << std::endl;

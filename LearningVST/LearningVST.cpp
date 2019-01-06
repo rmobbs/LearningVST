@@ -57,7 +57,7 @@ VstIntPtr VSTCALLBACK pluginVst2xHostCallback(AEffect *effect, VstInt32 opCode, 
       result = 1;
       break;
     case audioMasterWantMidi:
-      // This is deprecated but older instruments can make the call to tell us they're an instrument; we 
+      // This is deprecated but older instruments can make the call to tell us they're an instrument; we
       // want to ignore it but not return a failure
       result = 1;
       break;
@@ -95,7 +95,7 @@ VstIntPtr VSTCALLBACK pluginVst2xHostCallback(AEffect *effect, VstInt32 opCode, 
         vstTimeInfo.flags |= kVstTransportPlaying;
       }
 
-      // See what other info was requested. Note that I'm only mentioning 
+      // See what other info was requested. Note that I'm only mentioning
       // ones we actually handle, which could result in some unlogged cases.
       // TODO: add logging for requested data which we do not support
 
@@ -234,7 +234,7 @@ public:
           return 0;
         }
         // Otherwise it is in samples
-        return static_cast<int>(static_cast<double>(tailSize) * 
+        return static_cast<int>(static_cast<double>(tailSize) *
           GlobalSettings::get().getSampleRate() / 1000.0f);
       }
       case Setting::NumInputs:
@@ -248,9 +248,9 @@ public:
     return 0;
   }
 
-  virtual bool open() { 
+  virtual bool open() {
     // Attempt to load the DLL
-    this->handle = LoadLibraryExA((LPCSTR)absolutePath.c_str(), 
+    this->handle = LoadLibraryExA((LPCSTR)absolutePath.c_str(),
       nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
     if (this->handle == nullptr) {
       std::cerr << "Unable to load specified VSTi: " << GetLastErrorString().c_str() << std::endl;
@@ -308,9 +308,9 @@ public:
 
     // Setup
     plugin->dispatcher(plugin, effOpen, 0, 0, nullptr, 0.0f);
-    plugin->dispatcher(plugin, effSetSampleRate, 0, 0, 
+    plugin->dispatcher(plugin, effSetSampleRate, 0, 0,
       nullptr, static_cast<float>(GlobalSettings::get().getSampleRate()));
-    plugin->dispatcher(plugin, effSetBlockSize, 0, 
+    plugin->dispatcher(plugin, effSetBlockSize, 0,
       static_cast<VstIntPtr>(GlobalSettings::get().getBlockSize()), nullptr, 0.0f);
 
     VstSpeakerArrangement inSpeakers;
@@ -318,10 +318,10 @@ public:
     VstSpeakerArrangement outSpeakers;
     setupSpeakers(outSpeakers, plugin->numOutputs);
 
-    plugin->dispatcher(plugin, effSetSpeakerArrangement, 0, 
+    plugin->dispatcher(plugin, effSetSpeakerArrangement, 0,
       reinterpret_cast<VstIntPtr>(&inSpeakers), &outSpeakers, 0.0f);
 
-    return true;  
+    return true;
   }
 
   void resume() {
@@ -342,7 +342,7 @@ public:
     // Gee, sure hope it's done with the old data ...
 
     // Ensure our buffer has enough space
-    vstEventsBuffer.resize(sizeof(VstEvents) + 
+    vstEventsBuffer.resize(sizeof(VstEvents) +
       (midiEvents.size() * (sizeof(VstEvent*) + sizeof(VstMidiEvent))));
     uchar* memPtr = vstEventsBuffer.data();
 
@@ -379,10 +379,10 @@ public:
     plugin->dispatcher(plugin, effProcessEvents, 0, 0, vstEvents, 0.0f);
   }
 
-  void processAudio(SampleBuffer& inputSampleBuffer, SampleBuffer& outputSampleBuffer) {
+  void processAudio(SampleBuffer<float>& inputSampleBuffer, SampleBuffer<float>& outputSampleBuffer) {
 
     // NOTE: we're ony processing a single plugin which is an instrument. The input
-    // buffer was cleared on construction and will never be altered. And we only 
+    // buffer was cleared on construction and will never be altered. And we only
     // need to worry about writing to our output buffer. So this function is quite
     // simple at the moment.
 
@@ -480,9 +480,9 @@ int main(int argc, char *argv[])
             // Create the output file
             PcmWavFile pcmWavFile;
 
-            if (!pcmWavFile.openWrite(FLAGS_wav, 
-              static_cast<uint>(GlobalSettings::get().getNumChannels()), 
-              static_cast<uint>(GlobalSettings::get().getSampleRate()), 
+            if (!pcmWavFile.openWrite(FLAGS_wav,
+              static_cast<uint>(GlobalSettings::get().getNumChannels()),
+              static_cast<uint>(GlobalSettings::get().getSampleRate()),
               AudioBitDepth::Type16)) {
               std::cerr << "Unable to create WAV file" << std::endl;
             }
@@ -495,17 +495,17 @@ int main(int argc, char *argv[])
               // is because the VST plugin could be an effect (which would require input
               // audio to which the effect would be applied) or an instrument (which just
               // requires output).
-              SampleBuffer inputSampleBuffer(
+              SampleBuffer<float> inputSampleBuffer(
                 GlobalSettings::get().getNumChannels(),
                 GlobalSettings::get().getBlockSize());
-              SampleBuffer outputSampleBuffer(
+              SampleBuffer<float> outputSampleBuffer(
                 GlobalSettings::get().getNumChannels(),
                 GlobalSettings::get().getBlockSize());
 
               // Start 'er up
               instrumentPlugin->resume();
 
-              // This only works as a non-real-time process, because we are just 
+              // This only works as a non-real-time process, because we are just
               // repeatedly grabbing 'blocksize' events from the queue and pushing
               // them to the VSTi. We need to find a way to time sync.
               bool finishedSimulating = false;
@@ -517,7 +517,7 @@ int main(int argc, char *argv[])
                   AudioClock::get().getCurrentFrame() + GlobalSettings::get().getBlockSize(),
                   midiBlock);
 
-                // This seems suspect ... processing a full block of events then 
+                // This seems suspect ... processing a full block of events then
                 // processing the notes would seem to make things like tempo
                 // changes happen at the wrong time. This seems to assume such
                 // things will only happen at t=0
