@@ -9,6 +9,8 @@
 #include "MidiSource.h"
 #include "AudioClock.h"
 #include "GlobalSettings.h"
+#include "SampleBuffer.h"
+#include "PcmWavFile.h"
 
 // GFlags
 #include "gflags/gflags.h"
@@ -82,7 +84,7 @@ VstIntPtr VSTCALLBACK pluginVst2xHostCallback(AEffect *effect, VstInt32 opCode, 
       auto& audioClock = AudioClock::get();
 
       vstTimeInfo.samplePos = audioClock.getCurrentFrame();
-      vstTimeInfo.sampleRate = audioClock.getSampleRate();
+      vstTimeInfo.sampleRate = GlobalSettings::get().getSampleRate();
 
       // Set flags for transport state
       vstTimeInfo.flags = 0;
@@ -98,14 +100,14 @@ VstIntPtr VSTCALLBACK pluginVst2xHostCallback(AEffect *effect, VstInt32 opCode, 
       // TODO: add logging for requested data which we do not support
 
       if (value & kVstNanosValid) {
-        // Oh boy ... we're running real-time, seems we should implement this ... but how ...
+        // Oh boy ... we want to be running real-time, seems we should implement this ...
       }
       if (value & kVstPpqPosValid) {
         vstTimeInfo.ppqPos = audioClock.getPpqPos();
         vstTimeInfo.flags |= kVstPpqPosValid;
       }
       if (value & kVstTempoValid) {
-        vstTimeInfo.tempo = audioClock.getTempo();
+        vstTimeInfo.tempo = GlobalSettings::get().getTempo();
         vstTimeInfo.flags |= kVstTempoValid;
       }
       if (value & kVstBarsValid) {
@@ -118,8 +120,8 @@ VstIntPtr VSTCALLBACK pluginVst2xHostCallback(AEffect *effect, VstInt32 opCode, 
         vstTimeInfo.flags |= kVstBarsValid;
       }
       if (value & kVstTimeSigValid) {
-        vstTimeInfo.timeSigNumerator = audioClock.getBeatsPerMeasure();
-        vstTimeInfo.timeSigDenominator = audioClock.getNoteValue();
+        vstTimeInfo.timeSigNumerator = GlobalSettings::get().getBeatsPerMeasure();
+        vstTimeInfo.timeSigDenominator = GlobalSettings::get().getNoteValue();
         vstTimeInfo.flags |= kVstTimeSigValid;
       }
 
@@ -159,12 +161,6 @@ std::string GetLastErrorString()
   return std::string();
 }
 
-#define DEFAULT_BLOCKSIZE 5121
-
-// Only one instrument can be present in a chain, so for now we'll just directly use
-// a single plugin
-// We can later add effects
-
 enum class VstPluginType {
   Unknown,
   Effect,
@@ -172,12 +168,20 @@ enum class VstPluginType {
 };
 
 class VstPlugin {
+public:
+  enum class Setting {
+    TailTimeInMs,
+    NumInputs,
+    NumOutputs,
+    InitialDelay,
+  };
 protected:
   VstPluginType type = VstPluginType::Unknown;
   std::string name;
   std::string absolutePath;
   HMODULE handle;
   AEffect *plugin;
+  std::vector<uchar> vstEventsBuffer; // Buffer for the memory for the VstEvents struct and the array(s) of VstEvent structs
 
   void setupSpeakers(VstSpeakerArrangement& speakerArrangement, int numChannels) {
     memset(&speakerArrangement, 0, sizeof(speakerArrangement));
@@ -218,6 +222,30 @@ public:
 
     // We only support instruments at this time
     this->type = VstPluginType::Instrument;
+  }
+
+  int getSetting(Setting setting) {
+    switch (setting) {
+      case Setting::TailTimeInMs: {
+        VstInt32 tailSize = static_cast<VstInt32>(plugin->
+          dispatcher(plugin, effGetTailSize, 0, 0, nullptr, 0.0f));
+        // VST SDK indicates plugins will return 1 for no tail
+        if (tailSize < 2) {
+          return 0;
+        }
+        // Otherwise it is in samples
+        return static_cast<int>(static_cast<double>(tailSize) * 
+          GlobalSettings::get().getSampleRate() / 1000.0f);
+      }
+      case Setting::NumInputs:
+        return plugin->numInputs;
+      case Setting::NumOutputs:
+        return plugin->numOutputs;
+      case Setting::InitialDelay:
+        return plugin->initialDelay;
+    }
+    std::cerr << "Unknown plugin setting requested" << std::endl;
+    return 0;
   }
 
   virtual bool open() { 
@@ -281,7 +309,7 @@ public:
     // Setup
     plugin->dispatcher(plugin, effOpen, 0, 0, nullptr, 0.0f);
     plugin->dispatcher(plugin, effSetSampleRate, 0, 0, 
-      nullptr, static_cast<float>(AudioClock::get().getSampleRate()));
+      nullptr, static_cast<float>(GlobalSettings::get().getSampleRate()));
     plugin->dispatcher(plugin, effSetBlockSize, 0, 
       static_cast<VstIntPtr>(GlobalSettings::get().getBlockSize()), nullptr, 0.0f);
 
@@ -309,10 +337,65 @@ public:
     plugin->dispatcher(plugin, effMainsChanged, 0, 0, nullptr, 0.0f);
     plugin->dispatcher(plugin, effStopProcess, 0, 0, nullptr, 0.0f);
   }
+
+  void processMidiEvents(std::queue<MidiEvent>& midiEvents) {
+    // Gee, sure hope it's done with the old data ...
+
+    // Ensure our buffer has enough space
+    vstEventsBuffer.resize(sizeof(VstEvents) + 
+      (midiEvents.size() * (sizeof(VstEvent*) + sizeof(VstMidiEvent))));
+    uchar* memPtr = vstEventsBuffer.data();
+
+    // Get the VstEvents controlling structure
+    VstEvents* vstEvents = reinterpret_cast<VstEvents*>(memPtr);
+
+    // Advance buffer pointer past VstEvents struct and memory for VstEvent pointers
+    memPtr += sizeof(VstEvents) + (midiEvents.size() * sizeof(VstEvent*));
+
+    // Iterate through MIDI events, generate VST events, and set pointers
+    vstEvents->numEvents = 0;
+    while (!midiEvents.empty()) {
+      auto midiEvent = midiEvents.front();
+      midiEvents.pop();
+
+      if (midiEvent.eventType == MidiEvent::EventType::Message) {
+
+        VstMidiEvent* vstMidiEvent = reinterpret_cast<VstMidiEvent*>(memPtr);
+        memPtr += sizeof(VstMidiEvent);
+
+        memset(vstMidiEvent, 0, sizeof(VstMidiEvent));
+        vstMidiEvent->type = kVstMidiType;
+        vstMidiEvent->byteSize = sizeof(vstMidiEvent);
+        vstMidiEvent->deltaFrames = static_cast<VstInt32>(midiEvent.delta);
+        vstMidiEvent->midiData[0] = midiEvent.message.status;
+        vstMidiEvent->midiData[1] = midiEvent.dataptr[0];
+        vstMidiEvent->midiData[2] = midiEvent.dataptr[1];
+
+        vstEvents->events[vstEvents->numEvents] = reinterpret_cast<VstEvent*>(vstMidiEvent);
+        ++vstEvents->numEvents;
+      }
+    }
+
+    plugin->dispatcher(plugin, effProcessEvents, 0, 0, vstEvents, 0.0f);
+  }
+
+  void processAudio(SampleBuffer& inputSampleBuffer, SampleBuffer& outputSampleBuffer) {
+
+    // NOTE: we're ony processing a single plugin which is an instrument. The input
+    // buffer was cleared on construction and will never be altered. And we only 
+    // need to worry about writing to our output buffer. So this function is quite
+    // simple at the moment.
+
+    // Process
+    plugin->processReplacing(plugin, inputSampleBuffer.getSamples(),
+      outputSampleBuffer.getSamples(), static_cast<VstInt32>(outputSampleBuffer.getBlockSize()));
+  }
+
 };
 
 DEFINE_string(midi, "", "Full path to MIDI file");
 DEFINE_string(vsti, "", "Full path to VST instrument plugin");
+DEFINE_string(wav, "", "Full path to WAV output file");
 
 VstPlugin *instrumentPlugin = nullptr;
 
@@ -358,12 +441,12 @@ bool processMetaEvents(std::queue<MidiEvent>& midiEvents) {
           unsigned long beatLengthInUs = static_cast<unsigned long>
             ((midiEvent.dataptr[0] << 16) | (midiEvent.dataptr[1] << 8) | (midiEvent.dataptr[2]));
           tempo = (1000000.0 / static_cast<double>(beatLengthInUs)) * 60.0;
-          AudioClock::get().setTempo(tempo);
+          GlobalSettings::get().setTempo(tempo);
           break;
         }
         case MidiEvent::MetaType::TimeSignature: {
-          AudioClock::get().setBeatsPerMeasure(midiEvent.dataptr[0]);
-          AudioClock::get().setNoteValue(static_cast<unsigned short>(powl(2, midiEvent.dataptr[1])));
+          GlobalSettings::get().setBeatsPerMeasure(midiEvent.dataptr[0]);
+          GlobalSettings::get().setNoteValue(static_cast<unsigned short>(powl(2, midiEvent.dataptr[1])));
           break;
         }
         case MidiEvent::MetaType::EndOfTrack:
@@ -391,48 +474,74 @@ int main(int argc, char *argv[])
         std::cerr << "Currently unable to support MIDI other than type 0" << std::endl;
       }
       else {
-        // Make a copy of the sequence queue
-        std::queue<MidiEvent> midiSequence = midiFile.getTracks()[0].sequence;
-
         if (FLAGS_vsti.length() != 0) {
           instrumentPlugin = new VstPlugin(FLAGS_vsti);
           if (instrumentPlugin->open()) {
+            // Create the output file
+            PcmWavFile pcmWavFile;
 
-            // Start 'er up
-            instrumentPlugin->resume();
-
-            // This only works as a non-real-time process, because we are just 
-            // repeatedly grabbing 'blocksize' events from the queue and pushing
-            // them to the VSTi. We need to find a way to time sync.
-            bool finishedSimulating = false;
-            while (!finishedSimulating) {
-              // Get next block
-              std::queue<MidiEvent> midiBlock;
-              finishedSimulating = !getBlockFromSequence(midiSequence, 
-                AudioClock::get().getCurrentFrame(),
-                AudioClock::get().getCurrentFrame() + GlobalSettings::get().getBlockSize(), 
-                midiBlock);
-
-              // This seems suspect ... processing a full block of events then 
-              // processing the notes would seem to make things like tempo
-              // changes happen at the wrong time. This seems to assume such
-              // things will only happen at t=0
-
-              // Process events
-              auto metaQueue = midiBlock;
-              if (!processMetaEvents(metaQueue)) {
-                finishedSimulating = true;
-              }
-
-              // Send messages to plugin
-
-              // Render output
-
-              // Fixed clock advance rate
-              AudioClock::get().advance(GlobalSettings::get().getBlockSize());
+            if (!pcmWavFile.openWrite(FLAGS_wav, 
+              static_cast<uint>(GlobalSettings::get().getNumChannels()), 
+              static_cast<uint>(GlobalSettings::get().getSampleRate()), 
+              AudioBitDepth::Type16)) {
+              std::cerr << "Unable to create WAV file" << std::endl;
             }
+            else {
+              // Make a copy of the sequence queue
+              std::queue<MidiEvent> midiSequence = midiFile.getTracks()[0].sequence;
 
-            // TODO: CLEAN UP
+              // Create sample buffers
+              // VST plugins take an input sample buffer and an output sample buffer; this
+              // is because the VST plugin could be an effect (which would require input
+              // audio to which the effect would be applied) or an instrument (which just
+              // requires output).
+              SampleBuffer inputSampleBuffer(
+                GlobalSettings::get().getNumChannels(),
+                GlobalSettings::get().getBlockSize());
+              SampleBuffer outputSampleBuffer(
+                GlobalSettings::get().getNumChannels(),
+                GlobalSettings::get().getBlockSize());
+
+              // Start 'er up
+              instrumentPlugin->resume();
+
+              // This only works as a non-real-time process, because we are just 
+              // repeatedly grabbing 'blocksize' events from the queue and pushing
+              // them to the VSTi. We need to find a way to time sync.
+              bool finishedSimulating = false;
+              while (!finishedSimulating) {
+                // Get next block
+                std::queue<MidiEvent> midiBlock;
+                finishedSimulating = !getBlockFromSequence(midiSequence,
+                  AudioClock::get().getCurrentFrame(),
+                  AudioClock::get().getCurrentFrame() + GlobalSettings::get().getBlockSize(),
+                  midiBlock);
+
+                // This seems suspect ... processing a full block of events then 
+                // processing the notes would seem to make things like tempo
+                // changes happen at the wrong time. This seems to assume such
+                // things will only happen at t=0
+
+                // Process events
+                auto metaQueue = midiBlock;
+                if (!processMetaEvents(metaQueue)) {
+                  finishedSimulating = true;
+                }
+
+                // Send messages to plugin
+                instrumentPlugin->processMidiEvents(midiBlock);
+
+                // Process audio
+                instrumentPlugin->processAudio(inputSampleBuffer, outputSampleBuffer);
+
+                // Write out to WAV file
+                pcmWavFile.writeBuffer(outputSampleBuffer);
+
+                // Fixed clock advance rate
+                AudioClock::get().advance(GlobalSettings::get().getBlockSize());
+              }
+            }
+            pcmWavFile.closeWrite();
           }
         }
       }

@@ -2,11 +2,7 @@
 
 #include <math.h>
 #include "Types.h"
-
-#define DEFAULT_SAMPLE_RATE 44100.0
-#define DEFAULT_TEMPO 120.0
-#define DEFAULT_TIMESIG_BEATS_PER_MEASURE 4
-#define DEFAULT_TIMESIG_NOTE_VALUE 4
+#include "GlobalSettings.h"
 
 // Implemented as a singleton for simplicity ... use AudioClock::get
 class AudioClock {
@@ -14,10 +10,6 @@ protected:
   bool transportChanged = false;
   bool isPlaying = false;
   unsigned long currentFrame = 0;
-  double tempo = DEFAULT_TEMPO;
-  double sampleRate = DEFAULT_SAMPLE_RATE;
-  unsigned short beatsPerMeasure = DEFAULT_TIMESIG_BEATS_PER_MEASURE;
-  unsigned short noteValue = DEFAULT_TIMESIG_NOTE_VALUE;
 
   AudioClock() {
   }
@@ -40,45 +32,20 @@ public:
     return isPlaying;
   }
 
-  inline double getTempo() {
-    return tempo;
-  }
-
-  inline void setTempo(double tempo) {
-    this->tempo = tempo;
-  }
-
-  inline double getSampleRate() {
-    return sampleRate;
-  }
-
-  inline unsigned short getBeatsPerMeasure() {
-    return beatsPerMeasure;
-  }
-
-  inline void setBeatsPerMeasure(unsigned short beatsPerMeasure) {
-    this->beatsPerMeasure = beatsPerMeasure;
-  }
-
-  inline unsigned short getNoteValue() {
-    return noteValue;
-  }
-
-  inline void setNoteValue(unsigned short noteValue) {
-    this->noteValue = noteValue;
-  }
-
   // In VST lingo, PPQ is musical position in quarter note (e.g., 1.0 = 1 quarter note)
   inline double getPpqPos() {
     // This is dependent on two variables so better to always calculate it
-    double samplesPerBeat = (60.0 / getTempo()) * getSampleRate();
+    double samplesPerBeat = (60.0 / GlobalSettings::get().
+      getTempo()) * GlobalSettings::get().getSampleRate();
     return (getCurrentFrame() / samplesPerBeat) + 1.0f;
   }
 
   // Start of bar as musical position
   inline double getBarStartPos(double ppqPos) {
-    double currentBarPos = floor(ppqPos / static_cast<double>(getBeatsPerMeasure()));
-    return currentBarPos * static_cast<double>(getBeatsPerMeasure()) + 1.0;
+    double currentBarPos = floor(ppqPos / 
+      static_cast<double>(GlobalSettings::get().getBeatsPerMeasure()));
+    return currentBarPos * static_cast<double>
+      (GlobalSettings::get().getBeatsPerMeasure()) + 1.0;
   }
 
   void advance(unsigned long blockSize) {

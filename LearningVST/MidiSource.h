@@ -59,6 +59,7 @@ struct MidiEvent {
     struct {
       MessageType type;
       uchar channel;
+      uchar status;
     } message;
   }; 
 

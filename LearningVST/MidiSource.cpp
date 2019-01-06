@@ -243,8 +243,8 @@ bool MidiSource::readTrack(std::istream& is, unsigned int trackIndex) {
 
     // Generate absolute timestamp from relative delta
     assert(timeDivisionType == TimeDivisionType::TicksPerQuarterNote);
-    double ticksPerSecond = static_cast<double>(timeDivision) * AudioClock::get().getTempo() / 60.0;
-    double sampleFramesPerTick = AudioClock::get().getSampleRate() / ticksPerSecond;
+    double ticksPerSecond = static_cast<double>(timeDivision) * GlobalSettings::get().getTempo() / 60.0;
+    double sampleFramesPerTick = GlobalSettings::get().getSampleRate() / ticksPerSecond;
     currentTimeInSampleFrames += static_cast<long>(deltaTime * sampleFramesPerTick);
 
     // Next is the event type
@@ -404,6 +404,9 @@ bool MidiSource::readTrack(std::istream& is, unsigned int trackIndex) {
         }
       }
       else {
+        // Store the raw status byte for passing to VST
+        currentEvent.message.status = readByte;
+
         // Mark location in data buffer
         eventDataIndex.push_back(currentTrack.eventData.size());
 
